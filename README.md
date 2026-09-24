@@ -20,6 +20,7 @@
 
 ## Как это работает
 
+```text
 Upload File
       ↓
 Generate SHA-256 Hash
@@ -29,12 +30,13 @@ Store Hash in Blockchain
 Transfer / Store Document
       ↓
 Verify Integrity
+```
 
 При проверке система повторно вычисляет хеш файла и сравнивает его со значением, зарегистрированным в Blockchain.
 
 ## Технологии
 
-* 
+*
 
 ## Цель проекта
 
