@@ -1,10 +1,14 @@
+import logging
 from collections.abc import Sequence
 
 from app.core.block import GENESIS_PREV_HASH, Block
 from app.core.hashing import IHashService
 from app.core.record import Record
+from app.core.storage import ChainStorageError, IChainRepository
 
 GENESIS_TIMESTAMP = 0
+
+logger = logging.getLogger(__name__)
 
 
 class InvalidChainError(Exception):
@@ -12,12 +16,43 @@ class InvalidChainError(Exception):
 
 
 class Blockchain:
-    # без переданных блоков цепочка начинается с genesis
+    # цепочку берём из блоков или из хранилища, без них начинаем с genesis
     def __init__(
-        self, hash_service: IHashService, blocks: Sequence[Block] | None = None
+        self,
+        hash_service: IHashService,
+        blocks: Sequence[Block] | None = None,
+        repository: IChainRepository | None = None,
     ):
         self._hash_service = hash_service
-        self._blocks = list(blocks) if blocks else [self.create_genesis()]
+        self._repository = repository
+        self._blocked = False
+        self._blocks = list(blocks) if blocks else []
+        if not self._blocks and repository is not None:
+            self._load_from_repository()
+        if not self._blocks:
+            self._blocks = [self.create_genesis()]
+            self._save(self._blocks)
+        elif not self._blocked and not self.validate_chain():
+            self._block("цепочка повреждена после загрузки")
+
+    # читает блоки из хранилища, при ошибке чтения блокирует добавление
+    def _load_from_repository(self) -> None:
+        try:
+            self._blocks = self._repository.load_chain()
+        except ChainStorageError:
+            logger.exception("не удалось прочитать цепочку из хранилища")
+            self._blocks = [self.create_genesis()]
+            self._blocked = True
+
+    # блокирует добавление блоков и пишет ошибку в лог
+    def _block(self, reason: str) -> None:
+        self._blocked = True
+        logger.error("%s, добавление блоков запрещено", reason)
+
+    # сохраняет блоки, если хранилище подключено
+    def _save(self, blocks: Sequence[Block]) -> None:
+        if self._repository is not None:
+            self._repository.save_chain(blocks)
 
     # genesis создаётся вручную с фиксированными полями, поэтому он всегда одинаковый
     def create_genesis(self) -> Block:
@@ -39,6 +74,11 @@ class Blockchain:
     def last_block(self) -> Block:
         return self._blocks[-1]
 
+    # добавление заблокировано, если цепочка не прошла проверку при загрузке
+    @property
+    def is_blocked(self) -> bool:
+        return self._blocked
+
     # количество блоков вместе с genesis
     def __len__(self) -> int:
         return len(self._blocks)
@@ -55,11 +95,14 @@ class Blockchain:
             records,
             self._hash_service,
         )
+        self._save([*self._blocks, block])
         self._blocks.append(block)
         return block
 
     # проверяет genesis, а у каждого блока номер, хеш и ссылку на предыдущий
     def validate_chain(self) -> bool:
+        if self._blocked:
+            return False
         first = self._blocks[0]
         if first.index != 0 or first.prev_hash != GENESIS_PREV_HASH:
             return False
