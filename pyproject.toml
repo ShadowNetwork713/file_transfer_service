@@ -1,0 +1,17 @@
+[project]
+name = "file-transfer-service"
+version = "0.2.0"
+description = "Сервис безопасной передачи файлов с подтверждением целостности на основе blockchain"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

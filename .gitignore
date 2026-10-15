@@ -1,0 +1,90 @@
+# secrets
+.env
+.env.*
+*.env
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+
+# claude
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+
+# python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# test, lint and coverage caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.pytype/
+.tox/
+.nox/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# blockchain data and runtime files
+chain.json
+chain.json.*.tmp
+*.tmp
+/data/
+/storage/
+/uploads/
+/files/
+
+# logs and dumps
+*.log
+logs/
+*.dump
+*.sql.gz
+*.bak
+
+# frontend
+node_modules/
+.vite/
+.next/
+.parcel-cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# docker
+docker-compose.override.yml
+.docker/
+pgdata/
+postgres-data/
+
+# editors and ide
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+.history/
+
+# os
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# yougile
+yougile/snapshot.json
