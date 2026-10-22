@@ -104,11 +104,27 @@ classDiagram
         +CreateGenesis() Block
         +AddBlock(list~Record~) Block
         +ValidateChain() bool
+        +ValidateReport() ValidationReport
+        +FindBreak() ValidationIssue
+        +FindRecords(UUID) list~Record~
+    }
+    class ValidationReport {
+        +list~ValidationIssue~ Issues
+        +bool IsValid
+        +Summary() string
+    }
+    class ValidationIssue {
+        +int BlockIndex
+        +IssueCode Code
+        +string Message
+        +string Expected
+        +string Actual
     }
     class IBlockchainService {
         <<interface>>
         +RegisterDocument(UUID, string) RegistrationResult
         +ValidateChain() bool
+        +VerifyFile(UUID, Stream) FileCheckResult
     }
     class IChainRepository {
         <<interface>>
@@ -126,6 +142,8 @@ classDiagram
     Blockchain "1" o-- "*" Block
     Block "1" o-- "*" Record
     Blockchain ..> IHashService
+    Blockchain ..> ValidationReport
+    ValidationReport "1" o-- "*" ValidationIssue
     IBlockchainService ..> Blockchain
     Blockchain ..> IChainRepository
 ```
