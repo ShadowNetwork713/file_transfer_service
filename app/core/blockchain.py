@@ -5,6 +5,7 @@ from app.core.block import GENESIS_PREV_HASH, Block
 from app.core.hashing import IHashService
 from app.core.record import Record
 from app.core.storage import ChainStorageError, IChainRepository
+from app.core.validation import ValidationReport, validate_blocks
 
 GENESIS_TIMESTAMP = 0
 
@@ -99,16 +100,10 @@ class Blockchain:
         self._blocks.append(block)
         return block
 
-    # проверяет genesis, а у каждого блока номер, хеш и ссылку на предыдущий
+    # полный отчёт проверки блоков: номер, genesis, хеши блоков и записей, ссылки
+    def validate_report(self) -> ValidationReport:
+        return validate_blocks(self._blocks, self._hash_service)
+
+    # цепочка валидна, если она не заблокирована и в отчёте нет нарушений
     def validate_chain(self) -> bool:
-        if self._blocked:
-            return False
-        first = self._blocks[0]
-        if first.index != 0 or first.prev_hash != GENESIS_PREV_HASH:
-            return False
-        for position, block in enumerate(self._blocks):
-            if block.index != position or not block.verify(self._hash_service):
-                return False
-            if position > 0 and block.prev_hash != self._blocks[position - 1].hash:
-                return False
-        return True
+        return not self._blocked and self.validate_report().is_valid
