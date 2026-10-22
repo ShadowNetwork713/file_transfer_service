@@ -113,6 +113,15 @@ class Blockchain:
         report = self.validate_report()
         return None if report.is_valid else report.summary()
 
+    # записи документа в порядке регистрации вместе с номером блока
+    def find_records(self, document_id: str) -> list[tuple[Record, int]]:
+        return [
+            (record, block.index)
+            for block in self._blocks
+            for record in block.records
+            if record.document_id == document_id
+        ]
+
     # точка разрыва: первое нарушение цепочки, номер блока и причина
     def find_break(self) -> ValidationIssue | None:
         return self.validate_report().first_issue
