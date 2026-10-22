@@ -53,6 +53,29 @@ python -m unittest discover -s tests -t .
 
 Линтер (если установлен ruff): `ruff check app tests`.
 
+## Демо
+
+Консольная программа проходит 7 сценариев подряд: создание цепочки с genesis, добавление записей и блоков, сохранение и восстановление, проверка валидной цепочки, подмена записи, подмена хеша блока (разрыв цепочки), проверка внешнего файла.
+
+```bash
+python -m app.demo
+```
+
+Между сценариями пауза по Enter. Без пауз: `python -m app.demo --no-pause`. Другая папка для данных: `--dir <путь>` (по умолчанию `data/demo`). После каждой подмены `chain.json` возвращается в исходное состояние. Описание сценариев и ожидаемого вывода: `docs/09-demo-scenarios.md`.
+
+Пример вывода сценария с подменой записи:
+
+```text
+Сценарий 5. Изменение содержимого записи и обнаружение нарушения
+------------------------------------------------------------
+  В chain.json изменён fileHash записи в блоке 2
+    [лог] Цепочка повреждена. Блок 2: запись ... изменена, хеш записи не совпадает с пересчитанным. Добавление блоков запрещено
+  Результат: цепочка НЕ валидна, нарушений: 1
+  Проблемный блок: 2
+    - Блок 2: запись ... изменена, хеш записи не совпадает с пересчитанным
+      ожидалось 3e6d12e3a2190c88..., в блоке d09d937d6be61003...
+```
+
 ## Ядро блокчейна
 
 Код лежит в `app/core`:
@@ -62,9 +85,12 @@ python -m unittest discover -s tests -t .
 | `hashing.py` | `IHashService`, `Blake2bHashService`: хеш байтов, строки и потока (куски по 64 КБ), hex в нижнем регистре, 64 символа |
 | `record.py` | `Record`: запись о документе, хеш считается по каноническому JSON |
 | `block.py` | `Block`: блок со списком записей, хеш считается по заголовку |
-| `blockchain.py` | `Blockchain`: genesis, `add_block`, `validate_chain` |
+| `blockchain.py` | `Blockchain`: genesis, `add_block`, `validate_chain`, `validate_report`, `find_break`, `find_records` |
+| `validation.py` | `ValidationIssue`, `ValidationReport`, `validate_blocks`: отчёт проверки цепочки с блоком и причиной |
 | `storage.py` | `IChainRepository`, `JsonChainRepository`: хранение цепочки в JSON-файле |
-| `service.py` | `IBlockchainService`, `BlockchainService`: регистрация документа поверх ядра |
+| `service.py` | `IBlockchainService`, `BlockchainService`: регистрация документа и проверка внешнего файла |
+
+Демо-программа лежит в `app/demo.py`.
 
 ### Как пользоваться
 
@@ -92,6 +118,7 @@ print(service.validate_chain())
 |---|---|
 | `register_document(document_id, file_hash)` | кладёт запись в новый блок и возвращает `RegistrationResult(tx_id, block_index, status, error)` |
 | `validate_chain()` | проверяет всю цепочку, `True` если она целая |
+| `verify_file(document_id, stream)` | сверяет хеш файла с хешем в последней записи документа и возвращает `FileCheckResult(status, message, current_hash, registered_hash, block_index)` |
 
 * `tx_id` равен `recordHash` записи.
 * `status`: `CONFIRMED` после включения в блок, `FAILED` при сбое (повреждённая цепочка, ошибка записи на диск). После `FAILED` регистрацию можно повторить, сам документ не теряется. `PENDING` сейчас не возвращается: блок формируется сразу, значение оставлено для асинхронной схемы.
@@ -158,6 +185,43 @@ print(service.validate_chain())
 2. у каждого блока `index` равен его позиции;
 3. пересчитанный хеш блока и хеш каждой записи совпадают с сохранёнными;
 4. `prevHash` каждого блока равен `hash` предыдущего.
+
+### Отчёт проверки и точка разрыва
+
+`Blockchain.validate_report()` возвращает `ValidationReport` со списком нарушений. Каждое нарушение (`ValidationIssue`) содержит номер блока, код причины, сообщение, ожидаемое и найденное значение.
+
+| Код | Что не сходится |
+|---|---|
+| `EMPTY_CHAIN` | в цепочке нет блоков |
+| `GENESIS_INVALID` | у первого блока `prevHash` не из нулей |
+| `INDEX_MISMATCH` | номер в блоке не равен его позиции |
+| `BLOCK_HASH_MISMATCH` | хеш блока не совпадает с пересчитанным |
+| `PREV_HASH_MISMATCH` | `prevHash` не совпадает с хешем предыдущего блока (разрыв цепочки) |
+| `RECORD_HASH_MISMATCH` | хеш записи не совпадает с пересчитанным |
+
+```python
+report = chain.validate_report()
+if not report.is_valid:
+    print(report.summary())        # Цепочка повреждена. Блок 2: ... (найдено ещё нарушений: 1)
+    issue = chain.find_break()     # первое нарушение: issue.block_index, issue.code, issue.message
+```
+
+Все нарушения попадают в отчёт, проблемным блоком (точкой разрыва) считается блок первого нарушения. При загрузке `chain.json` строка `report.summary()` пишется в лог, добавление блоков блокируется.
+
+### Проверка внешнего файла
+
+```python
+with open("contract.pdf", "rb") as file:
+    result = service.verify_file("11111111-1111-4111-8111-111111111111", file)
+print(result.status, result.message)
+```
+
+| Статус | Когда |
+|---|---|
+| `VALID` | хеш файла совпадает с `fileHash` последней записи документа |
+| `INVALID` | хеши различаются |
+| `NOT_FOUND` | документа нет в цепочке |
+| `CHAIN_INVALID` | цепочка повреждена, файл подтвердить нельзя (в сообщении блок и причина) |
 
 ## Цель проекта
 
