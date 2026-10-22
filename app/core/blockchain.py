@@ -5,7 +5,7 @@ from app.core.block import GENESIS_PREV_HASH, Block
 from app.core.hashing import IHashService
 from app.core.record import Record
 from app.core.storage import ChainStorageError, IChainRepository
-from app.core.validation import ValidationReport, validate_blocks
+from app.core.validation import ValidationIssue, ValidationReport, validate_blocks
 
 GENESIS_TIMESTAMP = 0
 
@@ -27,14 +27,17 @@ class Blockchain:
         self._hash_service = hash_service
         self._repository = repository
         self._blocked = False
+        self._blocked_reason: str | None = None
         self._blocks = list(blocks) if blocks else []
         if not self._blocks and repository is not None:
             self._load_from_repository()
         if not self._blocks:
             self._blocks = [self.create_genesis()]
             self._save(self._blocks)
-        elif not self._blocked and not self.validate_chain():
-            self._block("цепочка повреждена после загрузки")
+        elif not self._blocked:
+            report = self.validate_report()
+            if not report.is_valid:
+                self._block(report.summary())
 
     # читает блоки из хранилища, при ошибке чтения блокирует добавление
     def _load_from_repository(self) -> None:
@@ -44,11 +47,13 @@ class Blockchain:
             logger.exception("не удалось прочитать цепочку из хранилища")
             self._blocks = [self.create_genesis()]
             self._blocked = True
+            self._blocked_reason = "Не удалось прочитать цепочку из хранилища"
 
     # блокирует добавление блоков и пишет ошибку в лог
     def _block(self, reason: str) -> None:
         self._blocked = True
-        logger.error("%s, добавление блоков запрещено", reason)
+        self._blocked_reason = reason
+        logger.error("%s. Добавление блоков запрещено", reason)
 
     # сохраняет блоки, если хранилище подключено
     def _save(self, blocks: Sequence[Block]) -> None:
@@ -88,8 +93,9 @@ class Blockchain:
     def add_block(self, records: Sequence[Record]) -> Block:
         if not records:
             raise ValueError("нельзя добавить блок без записей")
-        if not self.validate_chain():
-            raise InvalidChainError("цепочка повреждена, добавление блоков запрещено")
+        reason = self._refusal_reason()
+        if reason is not None:
+            raise InvalidChainError(f"{reason}. Добавление блоков запрещено")
         block = Block.create(
             self.last_block.index + 1,
             self.last_block.hash,
@@ -99,6 +105,17 @@ class Blockchain:
         self._save([*self._blocks, block])
         self._blocks.append(block)
         return block
+
+    # причина, по которой блоки не принимаются, или None если цепочка в порядке
+    def _refusal_reason(self) -> str | None:
+        if self._blocked:
+            return self._blocked_reason
+        report = self.validate_report()
+        return None if report.is_valid else report.summary()
+
+    # точка разрыва: первое нарушение цепочки, номер блока и причина
+    def find_break(self) -> ValidationIssue | None:
+        return self.validate_report().first_issue
 
     # полный отчёт проверки блоков: номер, genesis, хеши блоков и записей, ссылки
     def validate_report(self) -> ValidationReport:

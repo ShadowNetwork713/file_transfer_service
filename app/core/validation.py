@@ -33,6 +33,22 @@ class ValidationReport:
     def is_valid(self) -> bool:
         return not self.issues
 
+    # точка разрыва: первое нарушение, если оно есть
+    @property
+    def first_issue(self) -> ValidationIssue | None:
+        return self.issues[0] if self.issues else None
+
+    # короткий текст для людей: первое нарушение и сколько ещё найдено
+    def summary(self) -> str:
+        first = self.first_issue
+        if first is None:
+            return "Цепочка валидна"
+        text = f"Цепочка повреждена. {first.message}"
+        others = len(self.issues) - 1
+        if others:
+            text += f" (найдено ещё нарушений: {others})"
+        return text
+
 
 # проверяет блоки и собирает все нарушения, а не останавливается на первом
 def validate_blocks(
