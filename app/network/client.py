@@ -113,4 +113,3 @@ def post_json(base_url, path, data, timeout=2.0):
             raise APIError(504, "PEER_TIMEOUT", "Превышено время ожидания") from exc
 
         raise APIError(502, "PEER_UNAVAILABLE", "Пир недоступен") from exc
-

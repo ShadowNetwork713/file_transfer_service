@@ -221,8 +221,7 @@ class Node:
         ):
             raise APIError(502, "PEER_BAD_RESPONSE", "Некорректное подтверждение блока")
         return result
-    
-    
+
     def push_one(self, peer_url):
         url = peer_base_url(peer_url, self.allow_remote_peers)
         peer = self.peer_status(url)
@@ -269,4 +268,3 @@ class Node:
         )
 
         return self._check_delivery_result(result, next_index, envelope["block"]["hash"])
-
