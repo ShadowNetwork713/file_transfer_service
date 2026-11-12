@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f7f9">
+  <title>Состояние нод — File Transfer Service</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main class="page">
+    <header class="page-header">
+      <div>
+        <h1>Состояние нод</h1>
+        <p>Проверка соединения и ручной обмен блоками</p>
+      </div>
+    </header>
+
+    <section class="panel connect-panel" aria-labelledby="connection-title">
+      <h2 id="connection-title">Подключение к пиру</h2>
+      <label for="peer-url">Адрес пира</label>
+      <div class="connect-controls">
+        <input id="peer-url" type="url" spellcheck="false" autocomplete="url"
+          placeholder="http://127.0.0.1:8766">
+        <button id="connect-btn" class="button primary" type="button">
+          <span id="connect-btn-text">Запросить состояние</span>
+        </button>
+        <button id="refresh-btn" class="button" type="button">Обновить</button>
+      </div>
+    </section>
+
+    <section class="nodes-section" aria-labelledby="nodes-title">
+      <h2 id="nodes-title">Состояние цепочек</h2>
+      <div class="nodes-grid">
+        <article class="panel node-panel" aria-label="Локальная нода">
+          <div class="node-topline">
+            <span class="node-type">Локальная нода</span>
+            <span id="local-status" class="status-tag checking">Загрузка</span>
+          </div>
+          <div class="node-name"><span id="local-marker" class="node-initial">·</span><h3 id="local-name">—</h3></div>
+          <dl class="node-details">
+            <div><dt>Высота цепочки</dt><dd id="local-height" class="height-value">—</dd></div>
+            <div><dt>Хеш вершины</dt><dd><code id="local-tip" class="hash">—</code></dd></div>
+            <div><dt>Идентификатор сети</dt><dd id="local-network">—</dd></div>
+            <div><dt>Версия протокола</dt><dd id="local-version">—</dd></div>
+          </dl>
+        </article>
+
+        <article class="panel node-panel" aria-label="Удалённая нода">
+          <div class="node-topline">
+            <span class="node-type">Удалённая нода</span>
+            <span id="peer-status" class="status-tag idle">Нет данных</span>
+          </div>
+          <div class="node-name"><span id="peer-marker" class="node-initial">·</span><h3 id="peer-name">Не подключена</h3></div>
+          <dl class="node-details">
+            <div><dt>Высота цепочки</dt><dd id="peer-height" class="height-value">—</dd></div>
+            <div><dt>Хеш вершины</dt><dd><code id="peer-tip" class="hash">—</code></dd></div>
+            <div><dt>Идентификатор сети</dt><dd id="peer-network">—</dd></div>
+            <div><dt>Версия протокола</dt><dd id="peer-version">—</dd></div>
+          </dl>
+        </article>
+      </div>
+      <div class="comparison" aria-live="polite">
+        <span id="compare-icon" class="comparison-icon" aria-hidden="true">·</span>
+        <div>
+          <div id="compare-title" class="comparison-title">Ожидаем подключения</div>
+          <div id="compare-details" class="comparison-details">Запросите состояние другой ноды для сравнения.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel operations-panel" aria-labelledby="operations-title">
+      <h2 id="operations-title">Операции</h2>
+      <div class="operation-buttons">
+        <button id="create-btn" class="button" type="button">Создать демо-блок</button>
+        <button id="pull-btn" class="button" type="button">Получить один блок</button>
+		<button id="push-btn" class="button" type="button">Отправить один блок</button>
+      </div>
+      <p class="hint">Обмен выполняется вручную. Создание блока доступно при запуске с <code>--demo</code>.</p>
+    </section>
+
+    <section class="panel result-panel" aria-labelledby="result-title">
+      <div class="result-header">
+        <h2 id="result-title">Последняя операция</h2>
+        <time id="result-time">—</time>
+      </div>
+      <div class="result-row">
+        <span id="result-indicator" class="result-indicator" aria-hidden="true"></span>
+        <div>
+          <div id="result-text" class="result-text" role="status" aria-live="polite">Ожидание действий</div>
+          <div id="result-details" class="result-details">Результат запроса появится здесь.</div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
