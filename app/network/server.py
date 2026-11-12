@@ -108,6 +108,12 @@ def make_handler(node, *, demo_enabled=False):
                     raise APIError(400, "BAD_REQUEST", "Ожидается peerUrl")
                 result = node.pull_one(data["peerUrl"])
                 return self.send_payload(409 if result["status"] == "REJECTED" else 200, result)
+            if path.path == "/api/v1/peers/push":
+                data = self.read_payload()
+                if not isinstance(data, dict) or set(data) != {"peerUrl"}:
+                    raise APIError(400,"BAD_REQUEST","Ожидается peerUrl")
+                result = node.push_one(data["peerUrl"])
+                return self.send_payload(409 if result["status"] == "REJECTED" else 200,result)
             if path.path == "/api/v1/demo/blocks" and demo_enabled:
                 data = self.read_payload()
                 if data != {}:

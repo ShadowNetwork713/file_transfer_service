@@ -6,7 +6,7 @@ from app.core.blockchain import Blockchain, RejectedBlockError
 from app.core.hashing import Blake2bHashService, is_valid_hash
 from app.core.service import BlockchainService
 from app.core.storage import JsonChainRepository
-from app.network.client import get_json
+from app.network.client import get_json, post_json
 from app.network.contracts import (
     APIError, NETWORK_ID, PROTOCOL_VERSION, ensure_network,
     ensure_uuid, parse_block, parse_peer_status, peer_base_url,
@@ -114,3 +114,69 @@ class Node:
         if block.index != next_index:
             raise APIError(502, "PEER_BAD_RESPONSE", "Пир вернул блок с неверным индексом")
         return self.accept_block(envelope)
+    
+    
+    def push_one(self, peer_url):
+        url = peer_base_url(peer_url, self.allow_remote_peers)
+        peer = self.peer_status(url)
+
+        with self.lock:
+            local = self.status()
+
+            if not local["chainValid"]:
+                return {
+                    "status": "REJECTED",
+                    "code": "CHAIN_INVALID",
+                    "message": "Локальная цепочка повреждена"
+                }
+
+            if peer["height"] > local["height"]:
+                return {
+                    "status": "REJECTED",
+                    "code": "PEER_AHEAD",
+                    "message": "Высота пира больше локальной"
+                }
+
+            if peer["height"] == local["height"]:
+                if peer["tipHash"] != local["tipHash"]:
+                    return {
+                        "status": "REJECTED",
+                        "code": "BLOCK_CONFLICT",
+                        "message": "Разные вершины на одной высоте"
+                    }
+
+                return {
+                    "status": "ALREADY_SYNCED",
+                    "code": "OK",
+                    "message": "Вершины цепочек уже совпадают"
+                }
+
+            next_index = peer["height"] + 1
+            envelope = self.get_block(next_index)
+
+        result = post_json(
+            url,
+            "/api/v1/blocks",
+            envelope,
+            timeout=self.timeout
+        )
+
+        if (
+            not isinstance(result, dict)
+            or set(result) != {"status", "code", "message", "blockIndex", "blockHash"}
+            or result["status"] not in ("ACCEPTED", "ALREADY_PRESENT", "REJECTED")
+            or not isinstance(result["code"], str)
+            or not isinstance(result["message"], str)
+            or type(result["blockIndex"]) is not int
+            or result["blockIndex"] != next_index
+            or result["blockHash"] != envelope["block"]["hash"]
+            or (result["status"] != "REJECTED" and result["code"] != "OK")
+        ):
+            raise APIError(
+                502,
+                "PEER_BAD_RESPONSE",
+                "Некорректное подтверждение передачи блока"
+            )
+
+        return result
+
