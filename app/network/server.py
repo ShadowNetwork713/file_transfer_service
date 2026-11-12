@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from app.network.contracts import APIError, MAX_BODY_BYTES
+from app.network.instance import DataDirectoryInUseError, lock_data_directory
 from app.network.node import Node
 
 logger = logging.getLogger(__name__)
@@ -141,20 +142,26 @@ def main():
     parser.add_argument("--allow-remote-peers", action="store_true", help="Разрешить обращение за пределы loopback; только для доверенных сетей")
     parser.add_argument("--demo", action="store_true", help="Разрешить POST /api/v1/demo/blocks")
     args = parser.parse_args()
+    if not 1 <= args.port <= 65535:
+        parser.error("--port должен быть числом от 1 до 65535")
     if args.timeout <= 0:
         parser.error("--timeout должен быть больше нуля")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     kwargs = {"allow_remote_peers": args.allow_remote_peers, "timeout": args.timeout}
     if args.network_id is not None:
         kwargs["network_id"] = args.network_id
-    node = Node(args.node_id, args.data_dir, **kwargs)
-    with make_server(args.host, args.port, node, demo_enabled=args.demo) as server:
-        print(f"Node {args.node_id}: http://{args.host}:{args.port}  data={args.data_dir}", flush=True)
-        print(f"UI: http://{args.host}:{args.port}/", flush=True)
-        try:
-            server.serve_forever(poll_interval=0.1)
-        except KeyboardInterrupt:
-            print("Остановка ноды", flush=True)
+    try:
+        with lock_data_directory(args.data_dir) as data_dir:
+            node = Node(args.node_id, data_dir, **kwargs)
+            with make_server(args.host, args.port, node, demo_enabled=args.demo) as server:
+                print(f"Node {args.node_id}: http://{args.host}:{args.port}  data={data_dir}", flush=True)
+                print(f"UI: http://{args.host}:{args.port}/", flush=True)
+                try:
+                    server.serve_forever(poll_interval=0.1)
+                except KeyboardInterrupt:
+                    print("Остановка ноды", flush=True)
+    except (DataDirectoryInUseError, OSError, ValueError) as error:
+        parser.error(str(error))
 
 
 if __name__ == "__main__":
