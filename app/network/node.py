@@ -9,7 +9,8 @@ from app.core.storage import JsonChainRepository
 from app.network.client import get_json, post_json
 from app.network.contracts import (
     APIError, NETWORK_ID, PROTOCOL_VERSION, ensure_network,
-    ensure_uuid, parse_block, parse_peer_status, peer_base_url,
+    ensure_uint, ensure_uuid, parse_block, parse_peer_status, peer_base_url,
+    require_object,
 )
 
 
@@ -114,6 +115,112 @@ class Node:
         if block.index != next_index:
             raise APIError(502, "PEER_BAD_RESPONSE", "Пир вернул блок с неверным индексом")
         return self.accept_block(envelope)
+
+    def receive_announcement(self, announcement):
+        data = require_object(
+            announcement,
+            {"networkId", "protocolVersion", "sourceUrl", "index", "hash"},
+            "announcement",
+        )
+        ensure_network(data, self.network_id)
+        ensure_uint(data["index"], "index")
+        if data["index"] == 0 or not is_valid_hash(data["hash"]):
+            raise APIError(400, "BAD_REQUEST", "Нужны номер и хеш обычного блока")
+        source_url = peer_base_url(data["sourceUrl"], self.allow_remote_peers)
+
+        with self.lock:
+            if not self.chain.validate_chain():
+                return self._rejection("CHAIN_INVALID", "Локальная цепочка повреждена", data)
+            if data["index"] < len(self.chain):
+                existing = self.chain.blocks[data["index"]]
+                if existing.hash == data["hash"]:
+                    return self._block_result("ALREADY_PRESENT", "OK", "Блок уже имеется", data)
+                return self._rejection("BLOCK_CONFLICT", "На этой высоте уже другой блок", data)
+            if data["index"] != len(self.chain):
+                return self._rejection(
+                    "INDEX_MISMATCH", f"Ожидался блок {len(self.chain)}", data
+                )
+
+        source_status = self.peer_status(source_url)
+        if source_status["height"] < data["index"]:
+            return self._rejection("PEER_BEHIND", "У отправителя нет объявленного блока", data)
+
+        envelope = get_json(
+            source_url,
+            f"/api/v1/blocks/{data['index']}",
+            timeout=self.timeout,
+        )
+        try:
+            require_object(
+                envelope, {"networkId", "protocolVersion", "block"}, "envelope"
+            )
+            ensure_network(envelope, self.network_id)
+            block = parse_block(envelope["block"])
+        except APIError as error:
+            raise APIError(502, "PEER_BAD_RESPONSE", str(error)) from error
+
+        if block.index != data["index"] or block.hash != data["hash"]:
+            return self._rejection(
+                "ANNOUNCEMENT_MISMATCH",
+                "Полученный блок не совпадает с оповещением",
+                data,
+            )
+        return self.accept_block(envelope)
+
+    def announce_latest(self, peer_url, source_url):
+        destination_url = peer_base_url(peer_url, self.allow_remote_peers)
+        advertised_url = peer_base_url(source_url, self.allow_remote_peers)
+
+        with self.lock:
+            if not self.chain.validate_chain():
+                raise APIError(409, "CHAIN_INVALID", "Локальная цепочка повреждена")
+            if len(self.chain) == 1:
+                raise APIError(409, "NO_BLOCK", "После genesis ещё нет блока")
+            block = self.chain.last_block
+            announcement = {
+                "networkId": self.network_id,
+                "protocolVersion": PROTOCOL_VERSION,
+                "sourceUrl": advertised_url,
+                "index": block.index,
+                "hash": block.hash,
+            }
+
+        result = post_json(
+            destination_url,
+            "/api/v1/blocks/announce",
+            announcement,
+            timeout=self.timeout,
+        )
+        return self._check_delivery_result(result, block.index, block.hash)
+
+    @staticmethod
+    def _block_result(status, code, message, block_data):
+        return {
+            "status": status,
+            "code": code,
+            "message": message,
+            "blockIndex": block_data["index"],
+            "blockHash": block_data["hash"],
+        }
+
+    def _rejection(self, code, message, block_data):
+        return self._block_result("REJECTED", code, message, block_data)
+
+    @staticmethod
+    def _check_delivery_result(result, index, block_hash):
+        if (
+            not isinstance(result, dict)
+            or set(result) != {"status", "code", "message", "blockIndex", "blockHash"}
+            or result["status"] not in ("ACCEPTED", "ALREADY_PRESENT", "REJECTED")
+            or not isinstance(result["code"], str)
+            or not isinstance(result["message"], str)
+            or type(result["blockIndex"]) is not int
+            or result["blockIndex"] != index
+            or result["blockHash"] != block_hash
+            or (result["status"] != "REJECTED" and result["code"] != "OK")
+        ):
+            raise APIError(502, "PEER_BAD_RESPONSE", "Некорректное подтверждение блока")
+        return result
     
     
     def push_one(self, peer_url):
@@ -161,22 +268,5 @@ class Node:
             timeout=self.timeout
         )
 
-        if (
-            not isinstance(result, dict)
-            or set(result) != {"status", "code", "message", "blockIndex", "blockHash"}
-            or result["status"] not in ("ACCEPTED", "ALREADY_PRESENT", "REJECTED")
-            or not isinstance(result["code"], str)
-            or not isinstance(result["message"], str)
-            or type(result["blockIndex"]) is not int
-            or result["blockIndex"] != next_index
-            or result["blockHash"] != envelope["block"]["hash"]
-            or (result["status"] != "REJECTED" and result["code"] != "OK")
-        ):
-            raise APIError(
-                502,
-                "PEER_BAD_RESPONSE",
-                "Некорректное подтверждение передачи блока"
-            )
-
-        return result
+        return self._check_delivery_result(result, next_index, envelope["block"]["hash"])
 

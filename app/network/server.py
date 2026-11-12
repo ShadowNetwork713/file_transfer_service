@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from app.network.contracts import APIError, MAX_BODY_BYTES
+from app.network.contracts import APIError, MAX_BODY_BYTES, peer_base_url
 from app.network.instance import DataDirectoryInUseError, lock_data_directory
 from app.network.node import Node
 
@@ -103,6 +103,15 @@ def make_handler(node, *, demo_enabled=False):
             if path.path == "/api/v1/blocks":
                 result = node.accept_block(self.read_payload())
                 return self.send_payload(409 if result["status"] == "REJECTED" else 201 if result["status"] == "ACCEPTED" else 200, result)
+            if path.path == "/api/v1/blocks/announce":
+                result = node.receive_announcement(self.read_payload())
+                return self.send_payload(409 if result["status"] == "REJECTED" else 201 if result["status"] == "ACCEPTED" else 200, result)
+            if path.path == "/api/v1/peers/announce":
+                data = self.read_payload()
+                if not isinstance(data, dict) or set(data) != {"peerUrl"}:
+                    raise APIError(400, "BAD_REQUEST", "Ожидается peerUrl")
+                result = node.announce_latest(data["peerUrl"], self.server.advertise_url)
+                return self.send_payload(409 if result["status"] == "REJECTED" else 200, result)
             if path.path == "/api/v1/peers/pull":
                 data = self.read_payload()
                 if not isinstance(data, dict) or set(data) != {"peerUrl"}:
@@ -124,10 +133,23 @@ def make_handler(node, *, demo_enabled=False):
     return Handler
 
 
-def make_server(host, port, node, *, demo_enabled=False):
+def make_server(host, port, node, *, demo_enabled=False, advertise_url=None):
     server = ThreadingHTTPServer((host, port), make_handler(node, demo_enabled=demo_enabled))
     server.daemon_threads = True
     server.allow_reuse_address = True
+    actual_port = server.server_address[1]
+    if advertise_url is None:
+        if host in ("0.0.0.0", ""):
+            server.server_close()
+            raise ValueError("Для --host 0.0.0.0 укажите --advertise-url")
+        address = f"http://{host}:{actual_port}"
+    else:
+        address = advertise_url
+    try:
+        server.advertise_url = peer_base_url(address, node.allow_remote_peers)
+    except APIError:
+        server.server_close()
+        raise ValueError("Укажите доступный адрес ноды через --advertise-url") from None
     return server
 
 
@@ -137,6 +159,7 @@ def main():
     parser.add_argument("--data-dir", required=True, help="Отдельный каталог с chain.json")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--advertise-url", help="Адрес этой ноды, по которому пир запрашивает блок")
     parser.add_argument("--network-id", default=None, help="Идентификатор сети (по умолчанию общий demo v1)")
     parser.add_argument("--timeout", type=float, default=2.0)
     parser.add_argument("--allow-remote-peers", action="store_true", help="Разрешить обращение за пределы loopback; только для доверенных сетей")
@@ -153,7 +176,13 @@ def main():
     try:
         with lock_data_directory(args.data_dir) as data_dir:
             node = Node(args.node_id, data_dir, **kwargs)
-            with make_server(args.host, args.port, node, demo_enabled=args.demo) as server:
+            with make_server(
+                args.host,
+                args.port,
+                node,
+                demo_enabled=args.demo,
+                advertise_url=args.advertise_url,
+            ) as server:
                 print(f"Node {args.node_id}: http://{args.host}:{args.port}  data={data_dir}", flush=True)
                 print(f"UI: http://{args.host}:{args.port}/", flush=True)
                 try:
