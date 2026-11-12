@@ -82,6 +82,15 @@ def _check_block(
                 str(block.index),
             )
         )
+    if previous is None and (block.timestamp != 0 or block.records):
+        issues.append(
+            ValidationIssue(
+                position, IssueCode.GENESIS_INVALID,
+                "Блок 0: genesis должен иметь timestamp=0 и пустой список записей",
+                "timestamp=0, records=[]",
+                f"timestamp={block.timestamp}, records={len(block.records)}",
+            )
+        )
     if previous is None and block.prev_hash != GENESIS_PREV_HASH:
         issues.append(
             ValidationIssue(

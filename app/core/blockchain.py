@@ -16,6 +16,14 @@ class InvalidChainError(Exception):
     pass
 
 
+class RejectedBlockError(Exception):
+    """Предсказуемый отказ принять блок, пришедший от другой ноды."""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
+
+
 class Blockchain:
     # цепочку берём из блоков или из хранилища, без них начинаем с genesis
     def __init__(
@@ -105,6 +113,31 @@ class Blockchain:
         self._save([*self._blocks, block])
         self._blocks.append(block)
         return block
+
+    def append_external_block(self, incoming: Block) -> bool:
+        reason = self._refusal_reason()
+        if reason is not None:
+            raise RejectedBlockError("CHAIN_INVALID", reason)
+        if incoming.index < len(self._blocks):
+            existing = self._blocks[incoming.index]
+            if incoming.to_dict() == existing.to_dict():
+                return False
+            raise RejectedBlockError("BLOCK_CONFLICT", "На этой высоте уже находится другой блок")
+        if incoming.index != len(self._blocks):
+            raise RejectedBlockError("HEIGHT_MISMATCH", "Ожидался следующий блок цепочки")
+        if incoming.prev_hash != self.last_block.hash:
+            raise RejectedBlockError("PREV_HASH_MISMATCH", "Хеш предыдущего блока не совпадает с локальной вершиной")
+        if not incoming.records:
+            raise RejectedBlockError("EMPTY_BLOCK", "Нельзя присоединить пустой блок")
+        if any(not record.verify(self._hash_service) for record in incoming.records):
+            raise RejectedBlockError("RECORD_HASH_MISMATCH", "Некорректный хеш записи")
+        if incoming.hash != incoming.compute_hash(self._hash_service):
+            raise RejectedBlockError("BLOCK_HASH_MISMATCH", "Некорректный хеш блока")
+        # Копия исключает модификацию объекта запроса после его приёма.
+        block = Block.from_dict(incoming.to_dict())
+        self._save([*self._blocks, block])
+        self._blocks.append(block)
+        return True
 
     # причина, по которой блоки не принимаются, или None если цепочка в порядке
     def _refusal_reason(self) -> str | None:

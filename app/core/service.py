@@ -62,6 +62,11 @@ class BlockchainService:
 
     # регистрирует хеш документа в новом блоке, повтор той же регистрации блок не плодит
     def register_document(self, document_id: str, file_hash: str) -> RegistrationResult:
+        if not self._blockchain.validate_chain():
+            return RegistrationResult(
+                None, None, RegistrationStatus.FAILED,
+                "Нельзя подтвердить регистрацию: цепочка повреждена или заблокирована",
+            )
         existing = self._find_record(document_id, file_hash)
         if existing is not None:
             return self._confirmed(*existing)
