@@ -2,7 +2,7 @@ import logging
 from collections.abc import Sequence
 
 from app.core.block import GENESIS_PREV_HASH, Block
-from app.core.hashing import IHashService
+from app.core.hashing import IHashService, is_valid_hash
 from app.core.record import Record
 from app.core.storage import ChainStorageError, IChainRepository
 from app.core.validation import ValidationIssue, ValidationReport, validate_blocks
@@ -14,6 +14,12 @@ logger = logging.getLogger(__name__)
 
 class InvalidChainError(Exception):
     pass
+
+
+class RejectedBlockError(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
 
 
 class Blockchain:
@@ -105,6 +111,55 @@ class Blockchain:
         self._save([*self._blocks, block])
         self._blocks.append(block)
         return block
+
+    # принимает следующий блок от пира после проверки и сохранения
+    def append_external_block(self, block: Block) -> bool:
+        if not isinstance(block, Block):
+            raise RejectedBlockError("BAD_BLOCK_FORMAT", "Ожидался блок")
+
+        reason = self._refusal_reason()
+        if reason is not None:
+            raise RejectedBlockError("CHAIN_INVALID", reason)
+
+        if type(block.index) is not int or block.index < 1:
+            raise RejectedBlockError("INDEX_MISMATCH", "Неверный номер входящего блока")
+
+        if block.index < len(self._blocks):
+            if self._blocks[block.index] == block:
+                return False
+            raise RejectedBlockError(
+                "BLOCK_CONFLICT", f"Блок {block.index} расходится с локальной цепочкой"
+            )
+
+        if block.index != len(self._blocks):
+            raise RejectedBlockError(
+                "INDEX_MISMATCH", f"Ожидался блок {len(self._blocks)}, получен {block.index}"
+            )
+
+        if not block.records or not is_valid_hash(block.hash):
+            raise RejectedBlockError("BAD_BLOCK_FORMAT", "Неверный формат входящего блока")
+
+        if block.prev_hash != self.last_block.hash:
+            raise RejectedBlockError(
+                "PREV_HASH_MISMATCH",
+                f"Блок {block.index}: prevHash не совпадает с локальной вершиной",
+            )
+
+        if block.hash != block.compute_hash(self._hash_service):
+            raise RejectedBlockError(
+                "BLOCK_HASH_MISMATCH", f"Блок {block.index}: неверный хеш блока"
+            )
+
+        for record in block.records:
+            if not isinstance(record, Record) or not record.verify(self._hash_service):
+                raise RejectedBlockError(
+                    "RECORD_HASH_MISMATCH",
+                    f"Блок {block.index}: неверная запись или её хеш",
+                )
+
+        self._save([*self._blocks, block])
+        self._blocks.append(block)
+        return True
 
     # причина, по которой блоки не принимаются, или None если цепочка в порядке
     def _refusal_reason(self) -> str | None:
